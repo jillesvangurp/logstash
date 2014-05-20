@@ -191,7 +191,7 @@ class LogStash::Outputs::ElasticSearchHTTP < LogStash::Outputs::Base
   def flush(events, teardown=false)
     # Avoid creating a new string for newline every time
     newline = "\n".freeze
-
+    nr_events=0
     body = events.collect do |event, index, type|
       index = event.sprintf(@index)
 
@@ -203,18 +203,24 @@ class LogStash::Outputs::ElasticSearchHTTP < LogStash::Outputs::Base
       end
       header = { "index" => { "_index" => index, "_type" => type } }
       header["index"]["_id"] = event.sprintf(@document_id) if !@document_id.nil?
-
+      nr_events=nr_events+1
       [ header.to_json, newline, event.to_json, newline ]
     end.flatten
 
-    post(body.join(""))
+    @logger.debug("flushing #{nr_events} to elasticsearch")
+    begin
+      post(body.join(""))
+    rescue
+      @logger.warn("flush failed")
+      raise
+    end
   end # def receive_bulk
 
   def post(body)
     begin
       response = @agent.post!(@bulk_url, :body => body)
     rescue EOFError
-      @logger.warn("EOF while writing request or reading response header from elasticsearch",
+      @logger.warn("EOF while writing request or reading response header from elasticsearch, status #{response.status}",
                    :host => @host, :port => @port)
       raise
     end
@@ -240,5 +246,6 @@ class LogStash::Outputs::ElasticSearchHTTP < LogStash::Outputs::Base
 
   def teardown
     buffer_flush(:final => true)
+    @logger.debug("flushed remaining events to elasticsearch")
   end # def teardown
 end # class LogStash::Outputs::ElasticSearchHTTP
